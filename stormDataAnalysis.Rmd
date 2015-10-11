@@ -1,0 +1,152 @@
+---
+title: "United States Storm Data Analysis on Health and Economic Impact"
+author: "YeongWei"
+date: "Sunday, October 11, 2015"
+output: html_document
+---
+
+# Synopsis
+
+The dataset is studied and parsed to retain the relevant columns. It is then further enriched for the purpose of computation and analysis. On date/time aspects, *time zones* and *end date/time* are discarded, only retains the *begin date/time*. Based on this [link](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf), *FATALITIES* and *INJURIES* are treated as the number of cases recorded. On *PROPDMGEXP* and *CROPDMGEXP*, only rows with magnitude represented by the alphabetical characters "K", "M" and "B" is retained, where K represents Thousand, M as Million and B as Billion. The actual *PROPDMGVAL* and *CROPDMGVAL* values are computed by multiplying the integers with the magnitudes described. The total of *FATALITIES* and *INJURIES* is the metric used to measure health impact. The total of *PROPDMGVAL* and *CROPDMGVAL* actual values is the metric used to mesaure economic impact. *TORNADO* has highest impact on health. *Flood* contributed has highest impact on economy.
+ 
+# Data Processing
+
+## Reading Data
+
+1. It is assumed that the Storm Data CSV is named as 'repdata-data-StormData.csv' and placed in the current working directory.
+
+```{r echo=FALSE}
+workingDir <- "D:\\development\\datasciencecoursera\\5-reproducible-research\\redocp2"
+setwd(workingDir);
+```
+
+```{r cache = TRUE}
+stormDataCsv <- "repdata-data-StormData.csv"
+stormDataCsvFullpath <- paste(workingDir, "\\", stormDataCsv, sep = "")
+STORM_DATA <- read.csv(file = stormDataCsvFullpath, header = TRUE);
+```
+
+## Discard Irrelevant Columns
+```{r}
+interestedColumns <- c(
+  "BGN_DATE", "STATE", "COUNTYNAME", "EVTYPE", 
+  "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP");
+STORM_DATA <- STORM_DATA[, interestedColumns];
+```
+
+## Parse Date/Time
+```{r}
+dateTimeFormat <- "%m/%d/%Y";
+STORM_DATA$BGN_DATE <- strptime(STORM_DATA$BGN_DATE, format = dateTimeFormat);
+STORM_DATA <- STORM_DATA[!is.na(STORM_DATA$BGN_DATE), ];
+```
+
+## Promote Magnitude "m" to "M"
+```{r}
+STORM_DATA[STORM_DATA$PROPDMGEXP == "m", ]$PROPDMGEXP <- "M"
+STORM_DATA[STORM_DATA$CROPDMGEXP == "m", ]$CROPDMGEXP <- "M"
+```
+
+## Subset Rows for only Magnitude B, M abd K
+```{r}
+relevantUnits <- c("K", "M", "B");
+STORM_DATA <- STORM_DATA[
+  STORM_DATA$PROPDMGEXP %in% relevantUnits & STORM_DATA$CROPDMGEXP %in% relevantUnits, ];
+
+STORM_DATA$PROPDMGEXP <- as.character(STORM_DATA$PROPDMGEXP);
+STORM_DATA$CROPDMGEXP <- as.character(STORM_DATA$CROPDMGEXP);
+```
+
+## Compute Damage (*DMG) Actual Values
+```{r}
+unitValues <- list();
+unitValues[["K"]] <- 1000;
+unitValues[["M"]] <- 1000000;
+unitValues[["B"]] <- 1000000000;
+
+PROPDMGVAL <- mapply(function(x, y) { 
+  as.numeric(x) * as.numeric(unitValues[[y]]) 
+  }, STORM_DATA$PROPDMG, STORM_DATA$PROPDMGEXP);
+
+CROPDMGVAL <- mapply(function(x, y) { 
+  as.numeric(x) * as.numeric(unitValues[[y]]) 
+}, STORM_DATA$CROPDMG, STORM_DATA$CROPDMGEXP);
+
+STORM_DATA$PROPDMGVAL <- PROPDMGVAL;
+STORM_DATA$CROPDMGVAL <- CROPDMGVAL;
+```
+
+## Compute Health and Ecomony Impact Metric
+
+1. The total of *FATALITIES* and *INJURIES* is the metric used to measure health impact.
+```{r}
+TOTAL_HEALTH_CASE <- mapply(function(fatalities, injuries) {
+  fatalities + injuries;
+}, STORM_DATA$FATALITIES, STORM_DATA$INJURIES);
+
+STORM_DATA$TOTAL_HEALTH_CASE <- TOTAL_HEALTH_CASE;
+```
+
+2. The total of *PROPDMGVAL* and *CROPDMGVAL* actual values is the metric used to mesaure economic impact.
+```{r}
+TOTAL_ECONOMIC_DMG_VAL <- mapply(function(propDmgVal, cropDmgVal) {
+  propDmgVal + cropDmgVal;
+}, STORM_DATA$PROPDMGVAL, STORM_DATA$CROPDMGVAL);
+
+STORM_DATA$TOTAL_ECONOMIC_DMG_VAL <- TOTAL_ECONOMIC_DMG_VAL;
+```
+
+# Results
+
+1. Across the United States, which types of events (as indicated in the `EVTYPE` variable) are most harmful with respect to population health?
+```{r}
+HAZADOUS_EVENTS <- aggregate(TOTAL_HEALTH_CASE ~ EVTYPE, STORM_DATA, sum);
+HAZADOUS_EVENTS[HAZADOUS_EVENTS$TOTAL_HEALTH_CASE == max(HAZADOUS_EVENTS$TOTAL_HEALTH_CASE), ];
+```
+
+2. Across the United States, which types of events have the greatest economic consequences?
+```{r}
+ECONOMIC_IMPACT <- aggregate(TOTAL_ECONOMIC_DMG_VAL ~ EVTYPE, STORM_DATA, sum);
+ECONOMIC_IMPACT[ECONOMIC_IMPACT$TOTAL_ECONOMIC_DMG_VAL == max(ECONOMIC_IMPACT$TOTAL_ECONOMIC_DMG_VAL), ];
+```
+
+# Top 10 Events Based on Health or Economic Impact
+```{r echo=FALSE}
+library(ggplot2);
+```
+
+1. Health Impact
+```{r}
+HAZADOUS_EVENTS <- HAZADOUS_EVENTS[with(HAZADOUS_EVENTS, order(-TOTAL_HEALTH_CASE)), ][c(1:10), ];
+PLOT <- ggplot(
+    HAZADOUS_EVENTS, 
+    aes(x = reorder(EVTYPE, -TOTAL_HEALTH_CASE), y = TOTAL_HEALTH_CASE)) + 
+  geom_bar(stat = "identity") + 
+  xlab("Events") +
+  ylab("Total Number of Cases") + 
+  ggtitle("Total Number of Cases by Events on Health Impact") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1));
+print(PLOT);
+```
+
+2. Economic Impact
+```{r}
+ECONOMIC_IMPACT <- ECONOMIC_IMPACT[with(ECONOMIC_IMPACT, order(-TOTAL_ECONOMIC_DMG_VAL)), ][c(1:10), ];
+PLOT <- ggplot(
+    ECONOMIC_IMPACT, 
+    aes(x = reorder(EVTYPE, -TOTAL_ECONOMIC_DMG_VAL), y = TOTAL_ECONOMIC_DMG_VAL)) + 
+  geom_bar(stat = "identity") + 
+  xlab("Events") +
+  ylab("Total Amount of Damage Value") + 
+  ggtitle("Total Amount of Damage Value by Events on Economic Impact") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1));
+print(PLOT);
+```
+
+# Recommendation
+
+Below are the other events that the government of United States should pay attention to on top of the *TORNADO* and *FLOOD* event.
+
+```{r}
+unique(c(as.character(HAZADOUS_EVENTS$EVTYPE), as.character(ECONOMIC_IMPACT$EVTYPE)));
+```
